@@ -37,11 +37,25 @@ jobs:
           printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519 && chmod 600 ~/.ssh/id_ed25519
           echo "57.128.237.169 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIELIb+sFsqiTbISISc+qELm2l0wbp3/YuqjkSuXiiPJu" > ~/.ssh/known_hosts
 
-      - name: Kopia zapasowa obecnej wersji na serwerze
+      - name: Archiwizacja plików spoza strony i kopia zapasowa
         run: |
-          ssh "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" "set -e; mkdir -p ~/backups/sites && chmod 700 ~/backups/sites; \
-            tar czf ~/backups/sites/aktywnysenior-$(date +%F-%H%M%S).tar.gz -C $DOCROOT .; \
-            ls -1t ~/backups/sites/aktywnysenior-*.tar.gz | tail -n +11 | xargs -r rm --"
+          ssh "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" DOCROOT="$DOCROOT" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cd "$DOCROOT"
+          # Pliki robocze w katalogu strony (PDF-y, zdjęcia, dokumenty) nie są częścią strony,
+          # a część była publicznie dostępna. Przenosimy je do prywatnego archiwum zamiast kasować.
+          EXTRA=$(find . -mindepth 1 -maxdepth 1 ! -name index.html ! -name img ! -name version.txt ! -name .htaccess ! -name .well-known)
+          if [ -n "$EXTRA" ]; then
+            DEST="$HOME/archiwum/aktywnysenior-pliki-$(date +%F-%H%M%S)"
+            mkdir -p "$DEST" && chmod 700 "$HOME/archiwum" "$DEST"
+            find . -mindepth 1 -maxdepth 1 ! -name index.html ! -name img ! -name version.txt ! -name .htaccess ! -name .well-known -exec mv -t "$DEST" {} +
+            echo "Przeniesiono do $DEST:"; ls -1 "$DEST"
+          fi
+          mkdir -p "$HOME/backups/sites" && chmod 700 "$HOME/backups/sites"
+          tar czf "$HOME/backups/sites/aktywnysenior-$(date +%F-%H%M%S).tar.gz" -C "$DOCROOT" .
+          ls -1t "$HOME"/backups/sites/aktywnysenior-*.tar.gz | tail -n +11 | xargs -r rm --
+          echo "Kopia zapasowa gotowa."
+          REMOTE
 
       - name: Wysłanie strony na serwer
         run: |
