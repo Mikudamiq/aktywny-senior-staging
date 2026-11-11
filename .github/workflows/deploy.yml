@@ -1,0 +1,76 @@
+name: Deploy strony (squashaktywnysenior.pl)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: site-deploy
+  cancel-in-progress: false
+
+env:
+  DOCROOT: /var/www/aktywnysenior
+  SITE_URL: https://squashaktywnysenior.pl
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://squashaktywnysenior.pl
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Przygotowanie plików strony
+        run: |
+          mkdir -p _site
+          cp index.html _site/
+          cp -r img _site/
+          echo "${{ github.sha }}" > _site/version.txt
+
+      - name: Konfiguracja SSH
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519 && chmod 600 ~/.ssh/id_ed25519
+          echo "57.128.237.169 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIELIb+sFsqiTbISISc+qELm2l0wbp3/YuqjkSuXiiPJu" > ~/.ssh/known_hosts
+
+      - name: Archiwizacja plików spoza strony i kopia zapasowa
+        run: |
+          ssh "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" DOCROOT="$DOCROOT" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+          cd "$DOCROOT"
+          # Pliki robocze w katalogu strony (PDF-y, zdjęcia, dokumenty) nie są częścią strony,
+          # a część była publicznie dostępna. Przenosimy je do prywatnego archiwum zamiast kasować.
+          EXTRA=$(find . -mindepth 1 -maxdepth 1 ! -name index.html ! -name img ! -name version.txt ! -name .htaccess ! -name .well-known)
+          if [ -n "$EXTRA" ]; then
+            DEST="$HOME/archiwum/aktywnysenior-pliki-$(date +%F-%H%M%S)"
+            mkdir -p "$DEST" && chmod 700 "$HOME/archiwum" "$DEST"
+            find . -mindepth 1 -maxdepth 1 ! -name index.html ! -name img ! -name version.txt ! -name .htaccess ! -name .well-known -exec mv -t "$DEST" {} +
+            echo "Przeniesiono do $DEST:"; ls -1 "$DEST"
+          fi
+          mkdir -p "$HOME/backups/sites" && chmod 700 "$HOME/backups/sites"
+          tar czf "$HOME/backups/sites/aktywnysenior-$(date +%F-%H%M%S).tar.gz" -C "$DOCROOT" .
+          ls -1t "$HOME"/backups/sites/aktywnysenior-*.tar.gz | tail -n +11 | xargs -r rm --
+          echo "Kopia zapasowa gotowa."
+          REMOTE
+
+      - name: Wysłanie strony na serwer
+        run: |
+          rsync -rlz --delete --chmod=D755,F644 \
+            --exclude '.htaccess' --exclude '.well-known' \
+            _site/ "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:$DOCROOT/"
+
+      - name: Sprawdzenie strony na żywo
+        run: |
+          for i in $(seq 1 10); do
+            V=$(curl -fsS --max-time 10 "$SITE_URL/version.txt?$RANDOM" || true)
+            if [ "$V" = "${{ github.sha }}" ] && curl -fsS --max-time 10 "$SITE_URL/" | grep -q 'RMP_FORM_KEY'; then
+              echo "OK: na żywo działa $V"; exit 0
+            fi
+            echo "Próba $i: ${V:-brak odpowiedzi}"; sleep 3
+          done
+          echo "::error::Strona na żywo nie pokazuje nowej wersji. Poprzednia wersja jest w ~/backups/sites/ na serwerze."
+          exit 1
