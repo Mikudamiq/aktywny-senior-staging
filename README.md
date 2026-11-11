@@ -5,10 +5,12 @@ Strona programu PZSQ „Aktywny Senior” (bezpłatne zajęcia squasha dla osób
 - `index.html` — cała strona (HTML + CSS + JS w jednym pliku)
 - `img/` — obrazy (wcześniej osadzone w HTML jako base64)
 
-## Hosting
-Strona stoi na serwerze VPS (Apache) — tym samym środowisku co RMP. **Nie** na GitHub Pages
-(workflow `static.yml` publikuje tylko kopię pod github.io). Do 11.11.2026 zmiany były wgrywane ręcznie na serwer;
-docelowo deploy po merge do `main` przez GitHub Actions (SSH + rsync), jak w repo RMP.
+## Hosting i deploy
+Strona stoi na serwerze VPS (Apache, `57.128.237.169`) w katalogu `/var/www/aktywnysenior` — tym samym serwerze co RMP.
+**Deploy jest automatyczny po merge do `main`** (`.github/workflows/deploy.yml`):
+kopia zapasowa obecnej wersji do `~/backups/sites/` (10 ostatnich) → rsync `index.html` + `img/` → sprawdzenie,
+że https://squashaktywnysenior.pl/version.txt pokazuje nowy commit. Ponowny deploy: Actions → „Deploy strony” → Run workflow.
+GitHub Secrets: `SSH_PRIVATE_KEY`, `SSH_HOST`, `SSH_USER`.
 
 ## Formularz zapisów → RMP
 Zgłoszenia idą do RMP na **produkcji**: `https://rmp.polskisquash.pl`, formularz `aktywny-senior-zapis`
